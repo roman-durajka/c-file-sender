@@ -1,11 +1,11 @@
-##Assignment
+## Assignment
 
 program, ktorý pošle zadaný súbor alebo skupinu súborov po sieti na iný počítač alebo skupinu počítačov; program bude pracovať v troch režimoch:
  - buď sa pošle priamo celý súbor alebo skupina súborov,
  - alebo sa najskôr skomprimuje pomocou Huffmanovho kódovania (je nutné urobiť vlastnú implementáciu), potom sa pošle po sieti a po prijatí sa dekomprimuje,
  - alebo sa najskôr skomprimuje algoritmom LZW (je nutné urobiť vlastnú implementáciu), potom sa pošle po sieti a po prijatí sa dekomprimuje;
 
-###Extras
+### Extras
 
  - žiadne úniky pamäte (toto je nutné explicitne ukázať s využitím nástrojov, ktoré sú na to určené, ideálne Valgrind),
  - kód musí byť logicky rozčlenený do .h a .c súborov, pričom je potrebné dodržiavať princípy objektového programovania (hlavne zapuzdrenie),

@@ -43,9 +43,18 @@ int main(int argc, char *argv[]) {
     printError("Error - connect.");
   }
 
-	//inicializacia dat zdielanych medzi vlaknami
+  // create data for thread that reads data and signals them to other threads
+  IR_DATA *inputReaderData = calloc(1, sizeof(IR_DATA));
+  inputReaderData_init(inputReaderData, 2);
+
+  // create input reader thread
+  pthread_t inputReaderThread;
+  pthread_create(&inputReaderThread, NULL, signalUserInput,
+                 (void *)inputReaderData);
+
+  // inicializacia dat zdielanych medzi vlaknami
   DATA data;
-	data_init(&data, userName, sock);
+	data_init(&data, inputReaderData, userName, sock);
 
 	//vytvorenie vlakna pre zapisovanie dat do socketu <pthread.h>
   pthread_t thread;
@@ -56,7 +65,12 @@ int main(int argc, char *argv[]) {
 
 	//pockame na skoncenie zapisovacieho vlakna <pthread.h>
 	pthread_join(thread, NULL);
+
+  //wait for signaling thread to end
+  pthread_join(inputReaderThread, NULL);
+
 	data_destroy(&data);
+  inputReaderData_destroy(inputReaderData);
 
   //uzavretie socketu <unistd.h>
   close(sock);

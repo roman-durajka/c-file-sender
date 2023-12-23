@@ -9,14 +9,21 @@
 #include <unistd.h>
 #include <pthread.h>
 
+
 int main(int argc, char* argv[]) {
-  if (argc < 3) {
-    printError("Sever has to be started with these paremeters: port pouzivatel.");
+  if (argc < 4) {
+    printError("Sever has to be started with these paremeters: port username number_of_clients.");
   }
   int port = atoi(argv[1]);
 	if (port <= 0) {
 		printError("Port has to be number larger than 0.");
 	}
+
+  int numberOfClients = atoi(argv[3]);
+  if (numberOfClients < 1) {
+    printf("There has to be at least 1 client.");
+  }
+
   char *userName = argv[2];
 
   //vytvorenie TCP socketu <sys/socket.h>
@@ -37,36 +44,76 @@ int main(int argc, char* argv[]) {
   }
 
   //server bude prijimat nove spojenia cez socket serverSocket <sys/socket.h>
-  listen(serverSocket, 10);
+  listen(serverSocket, numberOfClients);
 
-  //server caka na pripojenie klienta <sys/socket.h>
-  struct sockaddr_in clientAddress;
-  socklen_t clientAddressLength = sizeof(clientAddress);
-  int clientSocket = accept(serverSocket, (struct sockaddr *)&clientAddress, &clientAddressLength);
+  //allocate memory for threads
+  pthread_t * threads = calloc(numberOfClients * 2, sizeof(pthread_t));
 
-  //uzavretie pasivneho socketu <unistd.h>
-  close(serverSocket);
-  if (clientSocket < 0) {
-    printError("Error - accept.");
+  //allocate memory to store sockets
+  int * clientSockets = calloc(numberOfClients, sizeof(int));
+
+  //create array to store all data
+  DATA * savedData[numberOfClients];
+
+  //create data for thread that reads data and signals them to other threads
+  IR_DATA * inputReaderData = calloc(1, sizeof(IR_DATA));
+  inputReaderData_init(inputReaderData, numberOfClients * 2);
+
+  //create input reader thread
+  pthread_t inputReaderThread;
+  pthread_create(&inputReaderThread, NULL, signalUserInput, (void *)inputReaderData);
+
+  printf("Waiting for connections...\n");
+  for (int i = 0; i < numberOfClients * 2; i += 2) {
+    // server caka na pripojenie klienta <sys/socket.h>
+    struct sockaddr_in clientAddress;
+    socklen_t clientAddressLength = sizeof(clientAddress);
+    int clientSocket = accept(serverSocket, (struct sockaddr *)&clientAddress,
+                              &clientAddressLength);
+
+    if (clientSocket < 0) {
+      printf("Error accepting socket. Skpping...\n");
+      continue;
+    }
+
+    clientSockets[i] = clientSocket;
+
+    // inicializacia dat zdielanych medzi vlaknami
+    DATA * data = calloc(1, sizeof(DATA));
+    data_init(data, inputReaderData, userName, clientSocket);
+    savedData[i] = data;
+
+    // vytvorenie vlakna pre zapisovanie dat do socketu <pthread.h>
+    pthread_create(&threads[i], NULL, sendData, (void *)data);
+    // vytvorenie vlakna pre citanie dat zo socketu <pthread.h>
+    pthread_create(&threads[i+1], NULL, receiveData, (void *)data);
   }
 
-	//inicializacia dat zdielanych medzi vlaknami
-  DATA data;
-	data_init(&data, userName, clientSocket);
+  // uzavretie pasivneho socketu <unistd.h>
+  close(serverSocket);
 
-	//vytvorenie vlakna pre zapisovanie dat do socketu <pthread.h>
-  pthread_t thread;
-  pthread_create(&thread, NULL, sendData, (void *)&data);
 
-	//v hlavnom vlakne sa bude vykonavat citanie dat zo socketu
-	receiveData((void *)&data);
-
-	//pockame na skoncenie zapisovacieho vlakna <pthread.h>
-	pthread_join(thread, NULL);
-	data_destroy(&data);
+	//pockame na skoncenie vlakien
+  pthread_join(inputReaderThread, NULL);
+  for (int i = 0; i < numberOfClients * 2; i++) {
+    pthread_join(threads[i], NULL);
+  }
 
   //uzavretie socketu klienta <unistd.h>
-  close(clientSocket);
+  for (int i = 0; i < numberOfClients; i++) {
+    close(clientSockets[i]);
+  }
+
+  //destroy input reader data
+  inputReaderData_destroy(inputReaderData);
+
+  //destroy all initialized data
+  for (int i = 0; i < numberOfClients; i++) {
+    data_destroy(savedData[i]);
+  }
+
+  free(threads);
+  free(clientSockets);
 
   return (EXIT_SUCCESS);
 }

@@ -5,11 +5,8 @@
 #ifndef FILE_H
 #define FILE_H
 
-void *signalUserInput(void *data);
-
 bool loadFileData(char *fileName, char **fileData, int *fileSize);
 bool writeFileData(char *fileName, const char *fileData, int fileSize);
-void readInput(char **buf);
 
 void *sendData(void *data);
 void *receiveData(void *data);

@@ -47,21 +47,21 @@ int main(int argc, char* argv[]) {
   listen(serverSocket, numberOfClients);
 
   //allocate memory for threads
-  pthread_t * threads = calloc(numberOfClients * 2, sizeof(pthread_t));
+  pthread_t threads[numberOfClients * 2];
 
   //allocate memory to store sockets
-  int * clientSockets = calloc(numberOfClients, sizeof(int));
+  int clientSockets[numberOfClients];
 
   //create array to store all data
   DATA * savedData[numberOfClients];
 
   //create data for thread that reads data and signals them to other threads
-  IR_DATA * inputReaderData = calloc(1, sizeof(IR_DATA));
-  inputReaderData_init(inputReaderData, numberOfClients * 2);
+  IR_DATA inputReaderData;
+  inputReaderData_init(&inputReaderData, numberOfClients * 2);
 
   //create input reader thread
   pthread_t inputReaderThread;
-  pthread_create(&inputReaderThread, NULL, signalUserInput, (void *)inputReaderData);
+  pthread_create(&inputReaderThread, NULL, signalUserInput, (void *)&inputReaderData);
 
   printf("Waiting for connections...\n");
   for (int i = 0; i < numberOfClients * 2; i += 2) {
@@ -76,12 +76,12 @@ int main(int argc, char* argv[]) {
       continue;
     }
 
-    clientSockets[i] = clientSocket;
+    clientSockets[i/2] = clientSocket;
 
     // inicializacia dat zdielanych medzi vlaknami
     DATA * data = calloc(1, sizeof(DATA));
-    data_init(data, inputReaderData, userName, clientSocket);
-    savedData[i] = data;
+    data_init(data, &inputReaderData, userName, clientSocket);
+    savedData[i/2] = data;
 
     // vytvorenie vlakna pre zapisovanie dat do socketu <pthread.h>
     pthread_create(&threads[i], NULL, sendData, (void *)data);
@@ -105,15 +105,13 @@ int main(int argc, char* argv[]) {
   }
 
   //destroy input reader data
-  inputReaderData_destroy(inputReaderData);
+  inputReaderData_destroy(&inputReaderData);
 
   //destroy all initialized data
   for (int i = 0; i < numberOfClients; i++) {
     data_destroy(savedData[i]);
+    free(savedData[i]);
   }
-
-  free(threads);
-  free(clientSockets);
 
   return (EXIT_SUCCESS);
 }

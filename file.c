@@ -1,5 +1,6 @@
 #include "file.h"
 #include "definitions.h"
+#include "input_reader.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -7,44 +8,6 @@
 #include <string.h>
 #include <stdbool.h>
 #include <unistd.h>
-
-
-void * signalUserInput(void * data) {
-  IR_DATA * pdata = (IR_DATA *)data;
-
-  while (pdata->activeThreads > 0) {
-    pthread_mutex_lock(&pdata->mutex);
-
-    zeroInputBuffer(pdata->buf);
-    readInput(pdata->buf);
-    pthread_cond_broadcast(&pdata->condition);
-
-    pthread_mutex_unlock(&pdata->mutex);
-    usleep(100000);
-  }
-
-  return NULL;
-}
-
-void readInput(char **buf) {
-  int tempSize = INPUT_BUFFER_CELL_COUNT * INPUT_BUFFER_CELL_SIZE + 1;
-  char temp[tempSize + 1];
-  int bufIndex = 0;
-  fgets(temp, tempSize, stdin);
-
-  char *strtokPtr;
-  char delimeter = ' ';
-  char *splitStr = strtok_r(temp, &delimeter, &strtokPtr);
-  while (splitStr != NULL && bufIndex < INPUT_BUFFER_CELL_COUNT) {
-    memcpy(*buf, splitStr, strlen(splitStr) * sizeof(char));
-    if (*(*buf + strlen(splitStr) - 1) == '\n') {
-      *(*buf + strlen(splitStr) - 1) = '\0';
-    }
-    splitStr = strtok_r(NULL, &delimeter, &strtokPtr);
-    buf++;
-    bufIndex++;
-  }
-}
 
 bool loadFileData(char * fileName, char ** fileData, int * fileSize) {
   FILE * f = fopen(fileName, "rb");
@@ -102,15 +65,18 @@ void data_writeData(int socket, void * data, size_t dataSize) {
 
 void *sendData(void *data) {
   DATA * pdata = (DATA *)data;
-  // send username
+  //send username
   data_writeData(pdata->socket, pdata->userName, USER_LENGTH);
 
+  //initialize input buffer where input from user will be saved
   char **inputBuffer = NULL;
   initInputBuffer(&inputBuffer);
-  while (!data_isStopped(pdata)) {
-    // while (1) {
-    //initInputBuffer(&inputBuffer);
 
+  //save peer username into variable
+  char peerUserName[USER_LENGTH + 1];
+  data_getPeerUserName(pdata, peerUserName);
+
+  while (!data_isStopped(pdata)) {
     //use mutex and signal to read input from user and copy it to local variable
     pthread_mutex_lock(&pdata->inputReaderData->mutex);
     while (compareInputBuffer(pdata->inputReaderData->buf, inputBuffer)) {
@@ -126,22 +92,32 @@ void *sendData(void *data) {
 
     if (strcmp(inputBuffer[0], "quit") == 0) {
       // send quit to peer
-      printf("[%s][send] Ending connection... Notifying peer.\n", pdata->peerUserName);
+      printf("[send][%s] Ending connection... Notifying peer.\n", peerUserName);
       data_writeData(pdata->socket, inputBuffer[0], INPUT_BUFFER_CELL_SIZE);
       data_stop(pdata);
       continue;
     }
 
+    //check for wrong first argument
+    if (strcmp(inputBuffer[0], "") == 0 ) {
+      continue;
+    }
     if (strcmp(inputBuffer[0], "alg1") != 0 &&
         strcmp(inputBuffer[0], "alg2") != 0 &&
         strcmp(inputBuffer[0], "plain") != 0) {
-      printf("[%s][send] Wrong input. Try again with correct mode - "
-             "plain/alg1/alg2.\n", pdata->peerUserName);
+      printf("[send][%s] Wrong input. Try again with correct mode - "
+             "plain/alg1/alg2.\n",
+             peerUserName);
+      continue;
+    }
+
+    //send only to specified recepients
+    if (strcmp(inputBuffer[1], "all") != 0 && strcmp(inputBuffer[1], peerUserName) != 0) {
       continue;
     }
 
     // for every specified file
-    for (int i = 1; i < INPUT_BUFFER_CELL_COUNT; i++) {
+    for (int i = 2; i < INPUT_BUFFER_CELL_COUNT; i++) {
       if (strcmp(inputBuffer[i], "") == 0) {
         break;
       }
@@ -151,25 +127,27 @@ void *sendData(void *data) {
       int fileSize;
       bool result = loadFileData(inputBuffer[i], &fileData, &fileSize);
       if (!result) {
-        printf("[%s][send] Could not read the file \"%s\". Skpping...\n",
-               pdata->peerUserName, inputBuffer[i]);
+        printf("[send][%s] Could not read the file \"%s\". Skpping...\n",
+               peerUserName, inputBuffer[i]);
         continue;
       } else {
-        printf("[%s][send] Successfuly read file.\n", pdata->peerUserName);
+        printf("[send][%s] Successfuly read file.\n", peerUserName);
       }
 
-      //if compress then compress
-      //if compress2 then compress2
-      //send compression method
+      // if compress then compress
+      // if compress2 then compress2
+      // send compression method
       data_writeData(pdata->socket, inputBuffer[0], INPUT_BUFFER_CELL_SIZE);
-      //send file size
+      // send file size
       data_writeData(pdata->socket, &fileSize, sizeof(int));
-      //send file name
+      // send file name
       data_writeData(pdata->socket, inputBuffer[i], INPUT_BUFFER_CELL_SIZE);
-      //send file over socket
-      printf("[%s][send] Sending file %s of size %d.\n", pdata->peerUserName, inputBuffer[i], fileSize);
+      // send file over socket
+      printf("[send][%s] Sending file %s of size %d.\n", peerUserName,
+             inputBuffer[i], fileSize);
       data_writeData(pdata->socket, fileData, fileSize);
-      printf("[%s][send] Successfully sent file %s to peer.\n", pdata->peerUserName, inputBuffer[i]);
+      printf("[send][%s] Successfully sent file %s to peer.\n", peerUserName,
+             inputBuffer[i]);
 
       free(fileData);
     }
@@ -179,7 +157,7 @@ void *sendData(void *data) {
     destroyInputBuffer(&inputBuffer);
   }
 
-  pdata->inputReaderData->activeThreads--;
+  inputReaderData_decrementActiveThreads(pdata->inputReaderData);
 
   return NULL;
 }
@@ -201,11 +179,10 @@ void *receiveData(void *data) {
   userName[USER_LENGTH] = '\0';
   bzero(userName, USER_LENGTH);
   data_readData(pdata->socket, userName, USER_LENGTH);
-  memcpy(pdata->peerUserName, userName, USER_LENGTH + 1);
-  printf("[%s][receive] Peer joined.\n", userName);
+  data_setPeerUserName(pdata, userName);
+  printf("[receive][%s] Peer joined.\n", userName);
 
   while (!data_isStopped(pdata)) {
-    // while (1) {
     // read compression method / or end of messaging
     char compressionMethod[INPUT_BUFFER_CELL_SIZE];
     data_readData(pdata->socket, compressionMethod, INPUT_BUFFER_CELL_SIZE);
@@ -221,9 +198,8 @@ void *receiveData(void *data) {
       char * quitMessage = "quit";
       data_writeData(pdata->socket, quitMessage, INPUT_BUFFER_CELL_SIZE);
       //print statement that connection has ended
-      printf("[%s][receive] Peer ended connection... Press any key to "
-             "continue.\n",
-             userName);
+      printf("[receive][%s] Peer ended connection... Enter any key or word to "
+             "continue.\n", userName);
       data_stop(pdata);
       continue;
     }
@@ -235,7 +211,7 @@ void *receiveData(void *data) {
     char fileName[INPUT_BUFFER_CELL_SIZE];
     data_readData(pdata->socket, fileName, INPUT_BUFFER_CELL_SIZE);
     // read file
-    printf("[%s][receive] Incoming file %s with size %d.\n", userName,
+    printf("[receive][%s] Incoming file %s with size %d.\n", userName,
            fileName, fileSize);
     char * fileData = calloc(fileSize, sizeof(char));
     data_readData(pdata->socket, fileData, fileSize);
@@ -243,16 +219,17 @@ void *receiveData(void *data) {
     // save file
     bool result = writeFileData(fileName, fileData, fileSize);
     if (!result) {
-      printf("[%s][receive] Could not write the file \"%s\". Skpping...\n",
+      printf("[receive][%s] Could not write the file \"%s\". Skpping...\n",
              userName, fileName);
     } else {
-      printf("[%s][receive] Successfuly written file \"%s\".\n", userName, fileName);
+      printf("[receive][%s] Successfuly written file \"%s\".\n", userName, fileName);
     }
 
     //free allocated memory
     free(fileData);
   }
 
-  pdata->inputReaderData->activeThreads--;
+  inputReaderData_decrementActiveThreads(pdata->inputReaderData);
+
   return NULL;
 }

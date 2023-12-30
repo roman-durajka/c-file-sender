@@ -73,7 +73,7 @@ void copyInputBuffer(char **src, char **dest) {
 }
 
 void *signalUserInput(void *data) {
-  IR_DATA *pdata = (IR_DATA *)data;
+  IR_DATA *pdata = (IR_DATA *) data;
 
   while (inputReaderData_getActiveThreads(pdata) > 0) {
     pthread_mutex_lock(&pdata->mutex);

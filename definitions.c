@@ -14,20 +14,20 @@
 
 char *endMsg = ":end";
 
-void data_init(DATA *data, IR_DATA * inputReaderData, const char* userName, const int socket) {
+void data_init(DATA *data, IR_DATA *inputReaderData, const char *userName, const int socket) {
   data->inputReaderData = inputReaderData;
-	data->socket = socket;
-	data->stop = 0;
-	data->userName[USER_LENGTH] = '\0';
+  data->socket = socket;
+  data->stop = 0;
+  data->userName[USER_LENGTH] = '\0';
   bzero(data->peerUserName, USER_LENGTH);
   data->peerUserName[USER_LENGTH] = '\0';
-	strncpy(data->userName, userName, USER_LENGTH);
-	pthread_mutex_init(&data->mutex, NULL);
+  strncpy(data->userName, userName, USER_LENGTH);
+  pthread_mutex_init(&data->mutex, NULL);
   pthread_cond_init(&data->condition, NULL);
 }
 
 void data_destroy(DATA *data) {
-	pthread_mutex_destroy(&data->mutex);
+  pthread_mutex_destroy(&data->mutex);
   pthread_cond_destroy(&data->condition);
 }
 
@@ -64,9 +64,9 @@ void data_getPeerUserName(DATA *data, char *userName) {
 
 void printError(char *str) {
   if (errno != 0) {
-		perror(str);
-	} else {
-		fprintf(stderr, "%s\n", str);
-	}
+    perror(str);
+  } else {
+    fprintf(stderr, "%s\n", str);
+  }
   exit(EXIT_FAILURE);
 }

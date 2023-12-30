@@ -1,6 +1,8 @@
 #include "file.h"
 #include "definitions.h"
 #include "input_reader.h"
+#include "huffman.h"
+#include "lzw.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -9,8 +11,8 @@
 #include <stdbool.h>
 #include <unistd.h>
 
-bool loadFileData(char * fileName, char ** fileData, int * fileSize) {
-  FILE * f = fopen(fileName, "rb");
+bool loadFileData(char *fileName, char **fileData, int *fileSize) {
+  FILE *f = fopen(fileName, "rb");
   if (!f) {
     return false;
   }
@@ -39,7 +41,7 @@ bool loadFileData(char * fileName, char ** fileData, int * fileSize) {
 }
 
 bool writeFileData(char *fileName, const char *fileData, int fileSize) {
-  FILE * f = fopen(fileName, "wb");
+  FILE *f = fopen(fileName, "wb");
   if (!f) {
     return false;
   }
@@ -54,17 +56,17 @@ bool writeFileData(char *fileName, const char *fileData, int fileSize) {
   return true;
 }
 
-void data_writeData(int socket, void * data, size_t dataSize) {
+void data_writeData(int socket, void *data, size_t dataSize) {
   size_t sentBytesTotal = 0;
 
   while (sentBytesTotal < dataSize) {
-    size_t sentBytes = write(socket, (unsigned char *)data + sentBytesTotal, dataSize - sentBytesTotal);
+    size_t sentBytes = write(socket, (unsigned char *) data + sentBytesTotal, dataSize - sentBytesTotal);
     sentBytesTotal += sentBytes;
   }
 }
 
 void *sendData(void *data) {
-  DATA * pdata = (DATA *)data;
+  DATA *pdata = (DATA *) data;
   //send username
   data_writeData(pdata->socket, pdata->userName, USER_LENGTH);
 
@@ -99,14 +101,14 @@ void *sendData(void *data) {
     }
 
     //check for wrong first argument
-    if (strcmp(inputBuffer[0], "") == 0 ) {
+    if (strcmp(inputBuffer[0], "") == 0) {
       continue;
     }
-    if (strcmp(inputBuffer[0], "alg1") != 0 &&
-        strcmp(inputBuffer[0], "alg2") != 0 &&
+    if (strcmp(inputBuffer[0], "huffman") != 0 &&
+        strcmp(inputBuffer[0], "lzw") != 0 &&
         strcmp(inputBuffer[0], "plain") != 0) {
       printf("[send][%s] Wrong input. Try again with correct mode - "
-             "plain/alg1/alg2.\n",
+             "plain/huffman/lzw.\n",
              peerUserName);
       continue;
     }
@@ -134,10 +136,54 @@ void *sendData(void *data) {
         printf("[send][%s] Successfuly read file.\n", peerUserName);
       }
 
-      // if compress then compress
-      // if compress2 then compress2
       // send compression method
       data_writeData(pdata->socket, inputBuffer[0], INPUT_BUFFER_CELL_SIZE);
+
+      // if huffman then compress using huffman before sending
+      if (strcmp(inputBuffer[0], "huffman") == 0) {
+        // one bit is saved as byte, so size * 8
+        // + 1 so \0 can be added
+        char *huffmanEncoded = calloc(fileSize * 8 + 1, sizeof(char));
+        if (huffmanEncoded == NULL) {
+          printf("[send][%s] Failed to allocate (probably too big) chunk of memory. Skipping...\n", peerUserName);
+          free(fileData);
+          continue;
+        }
+        int encodedSize;
+        unsigned int *frequencies = calloc(TREE_NODE_COUNT, sizeof(unsigned int));
+        huffmanEncode(fileData, fileSize, huffmanEncoded, &encodedSize, frequencies);
+
+        //replace variables with new data
+        fileSize = encodedSize;
+        free(fileData);
+        fileData = huffmanEncoded;
+
+        //send and free frequencies
+        data_writeData(pdata->socket, frequencies, TREE_NODE_COUNT * sizeof(unsigned int));
+        free(frequencies);
+      }
+
+      // if lzw then compress using lzw before sending
+      if (strcmp(inputBuffer[0], "lzw") == 0) {
+        // alloc atleast size of original file, and output will be in int
+        int *lzwEncoded = calloc(fileSize, sizeof(int));
+        if (lzwEncoded == NULL) {
+          printf("[send][%s] Failed to allocate (probably too big) chunk of "
+                 "memory. Skipping...\n",
+                 peerUserName);
+          free(fileData);
+          continue;
+        }
+        int encodedSize;
+        lzwEncode(fileData, fileSize, lzwEncoded, &encodedSize);
+
+
+        //replace original variables with new
+        fileSize = encodedSize;
+        free(fileData);
+        fileData = (char *) lzwEncoded;
+      }
+
       // send file size
       data_writeData(pdata->socket, &fileSize, sizeof(int));
       // send file name
@@ -166,13 +212,13 @@ void data_readData(int socket, void *data, size_t dataSize) {
   size_t receivedBytesTotal = 0;
 
   while (receivedBytesTotal < dataSize) {
-    size_t receivedBytes = read(socket, (unsigned char *)data + receivedBytesTotal, dataSize - receivedBytesTotal);
+    size_t receivedBytes = read(socket, (unsigned char *) data + receivedBytesTotal, dataSize - receivedBytesTotal);
     receivedBytesTotal += receivedBytes;
   }
 }
 
 void *receiveData(void *data) {
-  DATA *pdata = (DATA *)data;
+  DATA *pdata = (DATA *) data;
 
   //read and save username
   char userName[USER_LENGTH + 1];
@@ -195,13 +241,20 @@ void *receiveData(void *data) {
       }
 
       //also send quit to peer LISTENING thread
-      char * quitMessage = "quit";
+      char *quitMessage = "quit";
       data_writeData(pdata->socket, quitMessage, INPUT_BUFFER_CELL_SIZE);
       //print statement that connection has ended
       printf("[receive][%s] Peer ended connection... Enter any key or word to "
              "continue.\n", userName);
       data_stop(pdata);
       continue;
+    }
+
+    //do stuff if comression method is huffman
+    unsigned int *frequencies;
+    if (strcmp(compressionMethod, "huffman") == 0) {
+      frequencies = calloc(TREE_NODE_COUNT, sizeof(unsigned int));
+      data_readData(pdata->socket, frequencies, TREE_NODE_COUNT * sizeof(unsigned int));
     }
 
     // read file size
@@ -213,9 +266,35 @@ void *receiveData(void *data) {
     // read file
     printf("[receive][%s] Incoming file %s with size %d.\n", userName,
            fileName, fileSize);
-    char * fileData = calloc(fileSize, sizeof(char));
+    char *fileData = calloc(fileSize, sizeof(char));
     data_readData(pdata->socket, fileData, fileSize);
-    // maybe decompress?
+
+    // decompress if compression was used
+    // huffman
+    if (strcmp(compressionMethod, "huffman") == 0) {
+      char *huffmanDecoded;
+      int decodedSize;
+      huffmanDecode(fileData, fileSize, &huffmanDecoded, &decodedSize, frequencies);
+
+      //replace variables with new data and free
+      free(fileData);
+      fileData = huffmanDecoded;
+      fileSize = decodedSize;
+      free(frequencies);
+    }
+
+    //lzw
+    if (strcmp(compressionMethod, "lzw") == 0) {
+      char *lzwDecoded;
+      int decodedSize;
+      lzwDecode((int *) fileData, fileSize, &lzwDecoded, &decodedSize);
+
+      // replace variables with new data and free
+      free(fileData);
+      fileData = lzwDecoded;
+      fileSize = decodedSize;
+    }
+
     // save file
     bool result = writeFileData(fileName, fileData, fileSize);
     if (!result) {

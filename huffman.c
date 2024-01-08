@@ -175,6 +175,8 @@ void huffmanDecode(char *encoded, int encodedFileSize, char **decoded,
     }
   }
 
+  *decodedFileSize = size;
+
   // free the item, it wont be used
   free(rootItem);
   huffmanTree_destroy(node);

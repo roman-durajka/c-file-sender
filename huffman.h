@@ -16,9 +16,10 @@ typedef struct tree_node {
     struct tree_node *left;
     struct tree_node *right;
     char data;
+    bool isLeaf;
 } TREE_NODE;
 
-TREE_NODE *treeNode_init(TREE_NODE *self, char data);
+TREE_NODE *treeNode_init(TREE_NODE *self, char data, bool isLeaf);
 
 void treeNode_destroy(TREE_NODE *self);
 

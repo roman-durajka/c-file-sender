@@ -5,8 +5,9 @@
 #include <string.h>
 #include <stdlib.h>
 
-TREE_NODE *treeNode_init(TREE_NODE *self, char data) {
+TREE_NODE *treeNode_init(TREE_NODE *self, char data, bool isLeaf) {
   self->data = data;
+  self->isLeaf = isLeaf;
   self->left = NULL;
   self->right = NULL;
 
@@ -43,7 +44,7 @@ MIN_HEAP_ITEM *huffmanTree(MIN_HEAP *priorityQueue, unsigned int *frequencies) {
   for (int i = 0; i < TREE_NODE_COUNT; i++) {
     //create new tree node
     TREE_NODE *node = calloc(1, sizeof(TREE_NODE));
-    treeNode_init(node, (char) i);
+    treeNode_init(node, (char) i, true);
     // create new priority queue item
     MIN_HEAP_ITEM *item = calloc(1, sizeof(MIN_HEAP_ITEM));
     minHeapItem_init(item, node, frequencies[i]);
@@ -56,7 +57,7 @@ MIN_HEAP_ITEM *huffmanTree(MIN_HEAP *priorityQueue, unsigned int *frequencies) {
     MIN_HEAP_ITEM *right = minHeap_get(priorityQueue);
     TREE_NODE *sumNode = calloc(1, sizeof(TREE_NODE));
 
-    treeNode_init(sumNode, '$');
+    treeNode_init(sumNode, '$', false);
     // add left and right to the new node
     sumNode->left = left->data;
     sumNode->right = right->data;
@@ -76,7 +77,7 @@ MIN_HEAP_ITEM *huffmanTree(MIN_HEAP *priorityQueue, unsigned int *frequencies) {
 //traverses tree and sets resulting code to buffer
 bool traverseHuffmanTree(TREE_NODE *root, unsigned int index, char *buf,
                          char c) {
-  if (root->data == c) {
+  if (root->data == c && root->isLeaf) {
     buf[index] = '\0';
     return true;
   }
